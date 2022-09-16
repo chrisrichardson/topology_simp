@@ -10,7 +10,7 @@ from dolfinx.fem import Constant, dirichletbc, Expression
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.io import XDMFFile
 from ufl import Measure, dx, TestFunction, TrialFunction
-from ufl import sym, grad, dot, inner, div, Identity, action
+from ufl import sym, grad, dot, inner, div, Identity, action, as_vector
 import numpy as np
 
 # Algorithmic parameters
@@ -24,8 +24,8 @@ thetamin = 0.001  # minimum density modeling void
 
 # Mesh
 mesh = create_rectangle(
-    MPI.COMM_WORLD, [(-2, 0), (2, 1)], [100, 60], CellType.quadrilateral)
-
+    MPI.COMM_WORLD, [(-2, -1), (2, 1)], [100, 60], CellType.quadrilateral)
+tdim = mesh.topology.dim
 
 # Problem parameters
 thetamoy = 0.4  # target average material density
@@ -34,30 +34,30 @@ nu = 0.3
 lamda = E * nu / (1 + nu) / (1 - 2 * nu)
 
 mu = E / (2 * (1 + nu))
-f = Constant(mesh, (0.0, -1.0))  # force
+f = as_vector([0.0, -1.0])
 
 # Boundaries
-left_boundary = locate_entities_boundary(mesh, dim=1,
+left_boundary = locate_entities_boundary(mesh, dim=tdim - 1,
                                          marker=lambda x: np.isclose(x[0], -2.0))
 
-indices = locate_entities_boundary(mesh, dim=1,
+indices = locate_entities_boundary(mesh, dim=tdim - 1,
                                    marker=lambda x: np.logical_and(np.isclose(x[0], 2.0),
-                                                                   np.isclose(x[1], 0.5, atol=0.1)))
+                                                                   np.isclose(x[1], 0.0, atol=0.2)))
 values = np.ones_like(indices)
-facets = meshtags(mesh, mesh.topology.dim - 1, indices, values)
+facets = meshtags(mesh, tdim - 1, indices, values)
 ds = Measure("ds", subdomain_data=facets)
 
 # Function space for density field
 V0 = FunctionSpace(mesh, ("DG", 0))
 # Function space for displacement
-V2 = VectorFunctionSpace(mesh, ("CG", 2))
+V2 = VectorFunctionSpace(mesh, ("CG", 1))
 
 # Fixed boundary condtions
 left_dofs = locate_dofs_topological(V=V2,
-                                    entity_dim=1,
+                                    entity_dim=tdim - 1,
                                     entities=left_boundary)
 bc = dirichletbc(V=V2,
-                 value=np.array((0.0, 0.0), dtype=np.float64),
+                 value=np.zeros(tdim, dtype=np.float64),
                  dofs=left_dofs)
 
 p = Constant(mesh, 1.0)  # SIMP penalty exponent
@@ -81,7 +81,7 @@ def eps(v):
 
 
 def sigma(v):
-    return coeff * (lamda * div(v) * Identity(2) + 2 * mu * eps(v))
+    return coeff * (lamda * div(v) * Identity(tdim) + 2 * mu * eps(v))
 
 
 def energy_density(u, v):
