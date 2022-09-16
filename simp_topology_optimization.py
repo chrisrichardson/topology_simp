@@ -31,17 +31,18 @@ mesh = create_rectangle(
 thetamoy = 0.4  # target average material density
 E = 1.0
 nu = 0.3
-lamda = E*nu/(1+nu)/(1-2*nu)
+lamda = E * nu / (1 + nu) / (1 - 2 * nu)
 
-mu = E/(2*(1+nu))
-f = Constant(mesh, (0.0, -1.0))  # vertical downwards force
+mu = E / (2 * (1 + nu))
+f = Constant(mesh, (0.0, -1.0))  # force
 
 # Boundaries
 left_boundary = locate_entities_boundary(mesh, dim=1,
                                          marker=lambda x: np.isclose(x[0], -2.0))
 
 indices = locate_entities_boundary(mesh, dim=1,
-                                   marker=lambda x: np.logical_and(np.isclose(x[0], 2.0), np.isclose(x[1], 0.5, atol=0.1)))
+                                   marker=lambda x: np.logical_and(np.isclose(x[0], 2.0),
+                                                                   np.isclose(x[1], 0.5, atol=0.1)))
 values = np.ones_like(indices)
 facets = meshtags(mesh, mesh.topology.dim - 1, indices, values)
 ds = Measure("ds", subdomain_data=facets)
@@ -69,9 +70,9 @@ thetaold.vector.set(thetamoy)
 coeff = thetaold**p
 theta = Function(V0)
 
-volume = assemble_scalar(form(1.*dx(domain=mesh)))
+volume = assemble_scalar(form(1. * dx(domain=mesh)))
 avg_density_0 = assemble_scalar(
-    form(thetaold*dx))/volume  # initial average density
+    form(thetaold * dx)) / volume  # initial average density
 avg_density = 0.
 
 
@@ -80,7 +81,7 @@ def eps(v):
 
 
 def sigma(v):
-    return coeff*(lamda*div(v)*Identity(2)+2*mu*eps(v))
+    return coeff * (lamda * div(v) * Identity(2) + 2 * mu * eps(v))
 
 
 def energy_density(u, v):
@@ -90,29 +91,31 @@ def energy_density(u, v):
 # Inhomogeneous elastic variational problem
 u_ = TestFunction(V2)
 du = TrialFunction(V2)
-a = inner(sigma(u_), eps(du))*dx
-L = dot(f, u_)*ds(1)
+a = inner(sigma(u_), eps(du)) * dx
+L = dot(f, u_) * ds(1)
 
 
 def update_theta(u):
-    theta_exp = Expression((p*coeff*energy_density(u, u)/lagrange)
-                           ** (1/(p+1)), V0.element.interpolation_points())
+    theta_exp = Expression((p * coeff * energy_density(u, u) / lagrange)
+                           ** (1 / (p + 1)), V0.element.interpolation_points())
     theta.interpolate(theta_exp)
     thetav = theta.vector[:]
     theta.vector[:] = np.maximum(np.minimum(1, thetav), thetamin)
-#    theta.vector.apply("insert")
-    avg_density = assemble_scalar(form(theta*dx))/volume
+    avg_density = assemble_scalar(form(theta * dx)) / volume
     return avg_density
 
 
-# We now define a function for finding the correct value of the Lagrange multiplier $\lambda$. First, a rough bracketing of $\lambda$ is obtained, then a dichotomy is performed in the interval `[lagmin,lagmax]` until the correct average density is obtained to a certain tolerance.
+# We now define a function for finding the correct value of the
+# Lagrange multiplier $\lambda$. First, a rough bracketing of
+# $\lambda$ is obtained, then a dichotomy is performed in
+# the interval `[lagmin,lagmax]` until the correct average density is
+# obtained to a certain tolerance.
 
 
 def update_lagrange_multiplier(u, avg_density):
 
     avg_density1 = avg_density
 
-    print(lagrange.value, avg_density1, avg_density_0)
     # Initial bracketing of Lagrange multiplier
     if (avg_density1 < avg_density_0):
         lagmin = float(lagrange.value)
@@ -123,7 +126,6 @@ def update_lagrange_multiplier(u, avg_density):
     elif (avg_density1 > avg_density_0):
         lagmax = float(lagrange.value)
         while (avg_density > avg_density_0):
-            print('lval = ', lagrange.value)
             lagrange.value = 2.0 * lagrange.value
             avg_density = update_theta(u)
         lagmin = float(lagrange.value)
@@ -133,9 +135,8 @@ def update_lagrange_multiplier(u, avg_density):
 
     # Dichotomy on Lagrange multiplier
     inddico = 0
-    while ((abs(1.-avg_density/avg_density_0)) > tol_mass):
-        print(lagmin, lagmax, lagrange.value)
-        lagrange.value = 0.5 * (lagmax+lagmin)
+    while ((abs(1. - avg_density / avg_density_0)) > tol_mass):
+        lagrange.value = 0.5 * (lagmax + lagmin)
         avg_density = update_theta(u)
         inddico += 1
         if (avg_density < avg_density_0):
@@ -148,8 +149,15 @@ def update_lagrange_multiplier(u, avg_density):
 # Finally, the exponent update strategy is implemented:
 #
 # * first, $p=1$ for the first `niternp` iterations
-# * then, $p$ is increased by some amount which depends on the average gray level of the density field computed as $g = \frac{1}{\text{Vol(D)}}\int_D 4(\theta-\theta_{min})(1-\theta)\text{ dx}$, that is $g=0$ is $\theta(x)=\theta_{min}$ or $1$ everywhere and $g=1$ is $\theta=(\theta_{min}+1)/2$ everywhere.
-# * Note that $p$ can increase only if at least `exponent_update_frequency` AM iterations have been performed since the last update and only if the compliance evolution falls below a certain threshold.
+# * then, $p$ is increased by some amount which depends on the average
+# gray level of the density field computed as $g =
+# \frac{1}{\text{Vol(D)}}\int_D 4(\theta-\theta_{min})(1-\theta)\text{
+# dx}$, that is $g=0$ is $\theta(x)=\theta_{min}$ or $1$ everywhere and
+# $g=1$ is $\theta=(\theta_{min}+1)/2$ everywhere.
+# * Note that $p$ can increase only if at least
+# `exponent_update_frequency` AM iterations have been performed since
+# the last update and only if the compliance evolution falls below a
+# certain threshold.
 
 
 def update_exponent(exponent_counter):
@@ -159,12 +167,12 @@ def update_exponent(exponent_counter):
     elif (i >= niternp):
         if i == niternp:
             print("\n Starting penalized iterations\n")
-        if ((abs(compliance-old_compliance) < 0.01*compliance_history[0]) and
-                (exponent_counter > exponent_update_frequency)):
+        if ((abs(compliance - old_compliance) < 0.01 * compliance_history[0])
+                and (exponent_counter > exponent_update_frequency)):
             # average gray level
-            fgray = form((theta-thetamin)*(1.0-theta)*dx)
-            gray_level = 4.0/volume * assemble_scalar(fgray)
-            p.value = min(p.value*(1+0.3**(1.+gray_level/2)), pmax)
+            fgray = form((theta - thetamin) * (1.0 - theta) * dx)
+            gray_level = 4.0 / volume * assemble_scalar(fgray)
+            p.value = min(p.value * (1 + 0.3**(1. + gray_level / 2)), pmax)
             exponent_counter = 0
             print("   Updated SIMP exponent p = ", p.value)
     return exponent_counter
@@ -174,6 +182,8 @@ u = Function(V2, name="Displacement")
 old_compliance = 1e30
 ffile = XDMFFile(MPI.COMM_WORLD, "topology_optimization.xdmf", "w")
 ffile.write_mesh(mesh)
+ufile = XDMFFile(MPI.COMM_WORLD, "displacement.xdmf", "w")
+ufile.write_mesh(mesh)
 
 compliance_history = []
 for i in range(niter):
@@ -182,6 +192,7 @@ for i in range(niter):
     u = problem.solve()
 
     ffile.write_function(theta, i)
+    ufile.write_function(u, i)
 
     compliance = assemble_scalar(form(action(L, u)))
     compliance_history.append(compliance)
