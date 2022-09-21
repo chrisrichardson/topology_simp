@@ -23,8 +23,9 @@ thetamin = 0.001  # minimum density modeling void
 
 
 # Mesh
+n = 20
 mesh = create_rectangle(
-    MPI.COMM_WORLD, [(-2, -1), (2, 1)], [100, 60], CellType.quadrilateral)
+    MPI.COMM_WORLD, [(-2, -2), (2, 2)], [10 * n, 10 * n], CellType.quadrilateral)
 tdim = mesh.topology.dim
 
 # Problem parameters
@@ -70,9 +71,10 @@ thetaold.vector.set(thetamoy)
 coeff = thetaold**p
 theta = Function(V0)
 
-volume = assemble_scalar(form(1. * dx(domain=mesh)))
-avg_density_0 = assemble_scalar(
-    form(thetaold * dx)) / volume  # initial average density
+volume = MPI.COMM_WORLD.allreduce(assemble_scalar(form(1. * dx(domain=mesh))), MPI.SUM)
+# initial average density
+avg_density_0 = MPI.COMM_WORLD.allreduce(assemble_scalar(
+    form(thetaold * dx)), MPI.SUM) / volume
 avg_density = 0.
 
 
@@ -99,9 +101,10 @@ def update_theta(u):
     theta_exp = Expression((p * coeff * energy_density(u, u) / lagrange)
                            ** (1 / (p + 1)), V0.element.interpolation_points())
     theta.interpolate(theta_exp)
-    thetav = theta.vector[:]
-    theta.vector[:] = np.maximum(np.minimum(1, thetav), thetamin)
-    avg_density = assemble_scalar(form(theta * dx)) / volume
+    thetav = theta.vector.getArray()
+    theta.vector.setArray(np.maximum(np.minimum(1, thetav), thetamin))
+    avg_density = MPI.COMM_WORLD.allreduce(assemble_scalar(form(theta * dx)) / volume,
+                                           MPI.SUM)
     return avg_density
 
 
@@ -171,7 +174,7 @@ def update_exponent(exponent_counter):
                 and (exponent_counter > exponent_update_frequency)):
             # average gray level
             fgray = form((theta - thetamin) * (1.0 - theta) * dx)
-            gray_level = 4.0 / volume * assemble_scalar(fgray)
+            gray_level = 4.0 / volume * MPI.COMM_WORLD.allreduce(assemble_scalar(fgray), MPI.SUM)
             p.value = min(p.value * (1 + 0.3**(1. + gray_level / 2)), pmax)
             exponent_counter = 0
             print("   Updated SIMP exponent p = ", p.value)
@@ -194,16 +197,14 @@ for i in range(niter):
     ffile.write_function(theta, i)
     ufile.write_function(u, i)
 
-    compliance = assemble_scalar(form(action(L, u)))
+    compliance = MPI.COMM_WORLD.allreduce(assemble_scalar(form(action(L, u))), MPI.SUM)
     compliance_history.append(compliance)
     print("Iteration {}: compliance =".format(i), compliance)
 
     avg_density = update_theta(u)
-
     update_lagrange_multiplier(u, avg_density)
-
     exponent_counter = update_exponent(exponent_counter)
 
     # Update theta field and compliance
-    thetaold.vector[:] = theta.vector[:]
+    thetaold.vector.setArray(theta.vector.getArray())
     old_compliance = compliance
